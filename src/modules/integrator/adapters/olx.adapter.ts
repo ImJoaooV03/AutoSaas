@@ -8,15 +8,15 @@ export class OLXAdapter implements PortalAdapter {
   async validate(vehicle: NormalizedVehicle): Promise<string[]> {
     const errors: string[] = [];
     
-    // Regras fictícias da OLX
-    if (vehicle.description.length < 50) {
-      errors.push("OLX exige descrição com no mínimo 50 caracteres.");
+    // Regras fictícias da OLX (Ajustadas para ser compatível com o Wizard)
+    if (vehicle.description.length < 20) {
+      errors.push("OLX exige descrição com no mínimo 20 caracteres.");
     }
     if (!vehicle.price || vehicle.price < 1000) {
       errors.push("Preço inválido para OLX.");
     }
-    if (vehicle.media.length < 2) {
-      errors.push("OLX recomenda no mínimo 2 fotos.");
+    if (vehicle.media.length < 1) {
+      errors.push("OLX exige pelo menos 1 foto.");
     }
 
     return errors;
@@ -27,9 +27,6 @@ export class OLXAdapter implements PortalAdapter {
     
     // Simular delay de rede
     await new Promise(resolve => setTimeout(resolve, 1500));
-
-    // NOTA: Removemos a simulação de erro aleatório para garantir estabilidade na demo final
-    // if (Math.random() > 0.8) throw new Error("OLX API Gateway Timeout");
 
     return {
       externalId: `olx-${Math.floor(Math.random() * 100000)}`,

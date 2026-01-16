@@ -104,7 +104,7 @@ export class IntegrationWorker {
         transmission: vehicleData.transmission,
         title: vehicleData.title || `${vehicleData.brand} ${vehicleData.model}`,
         description: vehicleData.description || "Descrição padrão...",
-        media: [{ url: "https://img-wrapper.vercel.app/image?url=https://img-wrapper.vercel.app/image?url=https://placehold.co/600x400", isCover: true }, { url: "https://img-wrapper.vercel.app/image?url=https://img-wrapper.vercel.app/image?url=https://placehold.co/600x400", isCover: false }], // Mock
+        media: [{ url: "https://img-wrapper.vercel.app/image?url=https://img-wrapper.vercel.app/image?url=https://img-wrapper.vercel.app/image?url=https://placehold.co/600x400", isCover: true }, { url: "https://img-wrapper.vercel.app/image?url=https://img-wrapper.vercel.app/image?url=https://img-wrapper.vercel.app/image?url=https://placehold.co/600x400", isCover: false }], // Mock
       };
 
       // Executar ação baseada no tipo
@@ -141,8 +141,15 @@ export class IntegrationWorker {
     } catch (err: any) {
       console.error(`❌ Job Failed:`, err);
       
-      const isRetryable = !err.message.includes("Validation Failed"); // Simplificação
-      const nextAttempt = isRetryable && job.attempts < job.max_attempts;
+      // Lógica de Retry Inteligente
+      // Erros fatais (não retentáveis): Validação, Veículo não encontrado, Adapter inexistente
+      const isFatalError = 
+        err.message.includes("Validation Failed") || 
+        err.message.includes("Vehicle not found") ||
+        err.message.includes("Adapter not found");
+
+      const isRetryable = !isFatalError;
+      const nextAttempt = isRetryable && job.attempts < (job.max_attempts || 3);
 
       await supabase.from('integration_jobs').update({
         status: nextAttempt ? 'pending' : 'failed',

@@ -35,20 +35,20 @@ export async function seedDatabase(userId: string, tenantId: string) {
           { 
             tenant_id: tenantId, 
             vehicle_id: vehicle.id, 
-            url: `https://img-wrapper.vercel.app/image?url=https://placehold.co/600x400/2563eb/white?text=${vehicle.model}`, 
+            url: `https://img-wrapper.vercel.app/image?url=https://img-wrapper.vercel.app/image?url=https://placehold.co/600x400/2563eb/white?text=${vehicle.model}`, 
             is_cover: true, 
             position: 1 
           },
           { 
             tenant_id: tenantId, 
             vehicle_id: vehicle.id, 
-            url: `https://img-wrapper.vercel.app/image?url=https://placehold.co/600x400/e2e8f0/gray?text=Interior`, 
+            url: `https://img-wrapper.vercel.app/image?url=https://img-wrapper.vercel.app/image?url=https://placehold.co/600x400/e2e8f0/gray?text=Interior`, 
             is_cover: false, 
             position: 2 
           }
         ]);
 
-        // Add Costs (Finance)
+        // Add Vehicle Costs (Specific to the car)
         await supabase.from('vehicle_costs').insert({
             tenant_id: tenantId,
             vehicle_id: vehicle.id,
@@ -75,7 +75,29 @@ export async function seedDatabase(userId: string, tenantId: string) {
       });
     }
 
-    // 3. Create Proposals
+    // 3. Create General Transactions (Operational Costs)
+    const transactionCategories = [
+        { desc: 'Aluguel da Loja', cat: 'aluguel', amount: 3500, type: 'expense' },
+        { desc: 'Conta de Energia', cat: 'contas', amount: 450, type: 'expense' },
+        { desc: 'Internet Fibra', cat: 'contas', amount: 120, type: 'expense' },
+        { desc: 'Comissão Venda #123', cat: 'salarios', amount: 1500, type: 'expense' },
+        { desc: 'Venda de Acessórios', cat: 'venda_acessorios', amount: 800, type: 'income' },
+        { desc: 'Serviço de Despachante', cat: 'servicos', amount: 300, type: 'income' },
+    ];
+
+    for (const tx of transactionCategories) {
+        await supabase.from('transactions').insert({
+            tenant_id: tenantId,
+            description: tx.desc,
+            amount: tx.amount,
+            type: tx.type,
+            category: tx.cat,
+            date: new Date().toISOString(),
+            status: 'paid'
+        });
+    }
+
+    // 4. Create Proposals
     if (vehicles.length > 0) {
         const v = vehicles[0];
         await supabase.from('proposals').insert({

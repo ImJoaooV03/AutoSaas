@@ -1,32 +1,15 @@
 import { useState } from "react";
 import { KanbanBoard } from "../modules/crm/components/KanbanBoard";
 import { Plus, Filter, Search } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { LeadModal } from "../modules/crm/components/LeadModal";
 
 export function Leads() {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0); // Usado para forçar reload do Kanban
 
-  // Função simples para criar lead de teste
-  const createTestLead = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return alert("Faça login primeiro");
-
-    // Pegar tenant_id do user (via query ou assumindo contexto)
-    const { data: userData } = await supabase.from('users').select('tenant_id').eq('id', user.id).single();
-    if (!userData) return alert("Erro ao buscar tenant");
-
-    await supabase.from('leads').insert({
-        tenant_id: userData.tenant_id,
-        name: `Lead Teste ${Math.floor(Math.random() * 100)}`,
-        phone: '11999999999',
-        email: 'cliente@teste.com',
-        origin: 'manual',
-        status: 'new',
-        message: 'Tenho interesse no carro...'
-    });
-    
-    // Forçar refresh (idealmente usaria React Query ou Context)
-    window.location.reload(); 
+  const handleLeadCreated = () => {
+    // Incrementa a chave para forçar o componente filho (Kanban) a recarregar
+    setRefreshKey(prev => prev + 1);
   };
 
   return (
@@ -37,11 +20,11 @@ export function Leads() {
           <p className="text-sm text-slate-500">Acompanhe suas negociações em tempo real</p>
         </div>
         <button 
-            onClick={createTestLead}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-medium transition-colors"
+            onClick={() => setIsModalOpen(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-medium transition-colors shadow-sm shadow-blue-200"
         >
           <Plus size={18} />
-          Novo Lead (Teste)
+          Novo Lead
         </button>
       </div>
 
@@ -63,8 +46,16 @@ export function Leads() {
 
       {/* Kanban Area */}
       <div className="flex-1 min-h-0">
-        <KanbanBoard />
+        {/* Passamos a key para forçar remontagem quando um lead é criado */}
+        <KanbanBoard key={refreshKey} />
       </div>
+
+      {/* Modal de Cadastro */}
+      <LeadModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        onSuccess={handleLeadCreated}
+      />
     </div>
   );
 }

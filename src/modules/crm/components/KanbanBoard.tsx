@@ -1,9 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { supabase } from "../../../lib/supabase";
-import { Lead, LEAD_STATUS_LABELS, LEAD_STATUS_COLORS } from "../types";
-import { Loader2, Phone, Mail, User, AlertCircle, RefreshCw } from "lucide-react";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
+import { Lead } from "../types";
+import { Loader2, AlertCircle, RefreshCw } from "lucide-react";
+import {
+  DndContext,
+  DragOverlay,
+  useSensor,
+  useSensors,
+  PointerSensor,
+  KeyboardSensor,
+  closestCorners,
+  DragStartEvent,
+  DragOverEvent,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import { sortableKeyboardCoordinates, arrayMove } from "@dnd-kit/sortable";
+import { KanbanColumn } from "./KanbanColumn";
+import { KanbanCard } from "./KanbanCard";
+import { createPortal } from "react-dom";
 
 const COLUMNS: Lead['status'][] = ['new', 'contacted', 'proposal', 'negotiation', 'won', 'lost'];
 
@@ -11,6 +25,19 @@ export function KanbanBoard() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeLead, setActiveLead] = useState<Lead | null>(null);
+
+  // Sensors (Mouse/Touch/Keyboard)
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 5, // Prevent accidental drags when clicking buttons
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
   useEffect(() => {
     fetchLeads();
@@ -19,62 +46,123 @@ export function KanbanBoard() {
   async function fetchLeads() {
     setLoading(true);
     setError(null);
-    
     try {
       const { data, error: apiError } = await supabase
         .from('leads')
         .select('*, vehicles(brand, model)')
         .order('created_at', { ascending: false });
       
-      if (apiError) {
-        // Throw full error object to access Postgres codes (like 42P17)
-        throw apiError;
-      }
-      
-      if (data) {
-        setLeads(data as any);
-      }
+      if (apiError) throw apiError;
+      if (data) setLeads(data as any);
     } catch (err: any) {
       console.error("Erro ao buscar leads:", err);
-      
-      let message = "Não foi possível carregar os leads.";
-      
-      // Tratamento amigável de erros comuns
-      if (err.message?.includes("Failed to fetch") || err.message?.includes("NetworkError")) {
-        message = "Erro de conexão. Verifique sua internet ou se o banco de dados está acessível.";
-      } else if (err.code === "42P17" || err.message?.includes("infinite recursion")) {
-        message = "Erro crítico de configuração no banco de dados (Recursão). Contate o suporte.";
-      } else {
-        message = err.message || "Ocorreu um erro desconhecido.";
-      }
-      
-      setError(message);
+      setError("Não foi possível carregar os leads. Verifique sua conexão.");
     } finally {
       setLoading(false);
     }
   }
 
-  const moveCard = async (leadId: string, newStatus: Lead['status']) => {
-    // Optimistic update
-    const previousLeads = [...leads];
-    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
+  // --- Drag Handlers ---
+
+  function onDragStart(event: DragStartEvent) {
+    if (event.active.data.current?.type === "Lead") {
+      setActiveLead(event.active.data.current.lead);
+    }
+  }
+
+  function onDragOver(event: DragOverEvent) {
+    const { active, over } = event;
+    if (!over) return;
+
+    const activeId = active.id;
+    const overId = over.id;
+
+    if (activeId === overId) return;
+
+    const isActiveALead = active.data.current?.type === "Lead";
+    const isOverALead = over.data.current?.type === "Lead";
+    const isOverAColumn = over.data.current?.type === "Column";
+
+    if (!isActiveALead) return;
+
+    // Cenário 1: Arrastando sobre outro Lead
+    if (isActiveALead && isOverALead) {
+      setLeads((leads) => {
+        const activeIndex = leads.findIndex((l) => l.id === activeId);
+        const overIndex = leads.findIndex((l) => l.id === overId);
+
+        // Se estiverem em colunas diferentes, atualiza o status visualmente
+        if (leads[activeIndex].status !== leads[overIndex].status) {
+            const updatedLeads = [...leads];
+            updatedLeads[activeIndex].status = leads[overIndex].status;
+            return arrayMove(updatedLeads, activeIndex, overIndex - 1); // Insert before
+        }
+
+        // Mesma coluna, apenas reordena
+        return arrayMove(leads, activeIndex, overIndex);
+      });
+    }
+
+    // Cenário 2: Arrastando sobre uma Coluna vazia (ou área da coluna)
+    if (isActiveALead && isOverAColumn) {
+      setLeads((leads) => {
+        const activeIndex = leads.findIndex((l) => l.id === activeId);
+        const newStatus = over.id as Lead['status'];
+
+        if (leads[activeIndex].status !== newStatus) {
+            const updatedLeads = [...leads];
+            updatedLeads[activeIndex].status = newStatus;
+            return arrayMove(updatedLeads, activeIndex, activeIndex); // Update status only
+        }
+        return leads;
+      });
+    }
+  }
+
+  function onDragEnd(event: DragEndEvent) {
+    setActiveLead(null);
+    const { active, over } = event;
+    if (!over) return;
+
+    const activeLeadId = active.id as string;
+    const activeLead = leads.find(l => l.id === activeLeadId);
     
+    // O status já foi atualizado no estado local pelo onDragOver (Optimistic UI)
+    // Agora precisamos persistir no banco se houve mudança
+    if (activeLead) {
+        // Encontrar o status atual baseado na coluna onde ele "caiu" ou no estado atualizado
+        // Nota: Como onDragOver já atualizou o 'status' no array 'leads', podemos apenas salvar.
+        // Mas para garantir, verificamos se o 'over' é uma coluna ou um card de outra coluna.
+        
+        // A maneira mais segura é confiar no estado 'leads' que foi atualizado visualmente
+        // e disparar o update para o banco.
+        persistMove(activeLead.id, activeLead.status);
+    }
+  }
+
+  // --- Persistence ---
+
+  const persistMove = async (leadId: string, newStatus: Lead['status']) => {
     try {
       const { error } = await supabase.from('leads').update({ status: newStatus }).eq('id', leadId);
       if (error) throw error;
     } catch (err) {
-      console.error("Erro ao mover card:", err);
-      // Revert on error
-      setLeads(previousLeads);
-      alert("Não foi possível atualizar o status do lead.");
+      console.error("Erro ao persistir movimento:", err);
+      alert("Erro ao salvar alteração. Recarregando...");
+      fetchLeads(); // Revert on error
     }
   };
 
-  if (loading) {
-    return <div className="flex justify-center p-12"><Loader2 className="animate-spin text-blue-600" /></div>;
-  }
+  // Função auxiliar para botões manuais (sem drag)
+  const manualMoveCard = (leadId: string, newStatus: Lead['status']) => {
+    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
+    persistMove(leadId, newStatus);
+  };
 
-  // Error State UI
+  // --- Render ---
+
+  if (loading) return <div className="flex justify-center p-12"><Loader2 className="animate-spin text-blue-600" /></div>;
+
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-[400px] bg-white rounded-xl border border-red-100 p-8 text-center">
@@ -83,94 +171,42 @@ export function KanbanBoard() {
         </div>
         <h3 className="text-lg font-semibold text-slate-800 mb-2">Ops! Algo deu errado</h3>
         <p className="text-slate-500 max-w-md mb-6">{error}</p>
-        <button 
-          onClick={fetchLeads}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
-        >
-          <RefreshCw size={16} />
-          Tentar Novamente
+        <button onClick={fetchLeads} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">
+          <RefreshCw size={16} /> Tentar Novamente
         </button>
       </div>
     );
   }
 
   return (
-    <div className="flex h-[calc(100vh-12rem)] overflow-x-auto gap-4 pb-4">
-      {COLUMNS.map(status => (
-        <div key={status} className="min-w-[300px] w-[300px] flex flex-col bg-slate-50 rounded-xl border border-slate-200">
-          {/* Header */}
-          <div className={`p-3 border-b border-slate-200 font-semibold text-sm flex justify-between items-center ${LEAD_STATUS_COLORS[status].replace('bg-', 'bg-opacity-20 ')}`}>
-            <span>{LEAD_STATUS_LABELS[status]}</span>
-            <span className="bg-white px-2 py-0.5 rounded-full text-xs text-slate-500 border border-slate-200">
-              {leads.filter(l => l.status === status).length}
-            </span>
-          </div>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCorners}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragEnd={onDragEnd}
+    >
+      <div className="flex h-[calc(100vh-12rem)] overflow-x-auto gap-4 pb-4">
+        {COLUMNS.map((status) => (
+          <KanbanColumn
+            key={status}
+            status={status}
+            leads={leads.filter((l) => l.status === status)}
+            moveCard={manualMoveCard}
+          />
+        ))}
+      </div>
 
-          {/* Cards Container */}
-          <div className="flex-1 overflow-y-auto p-2 space-y-2">
-            {leads.filter(l => l.status === status).map(lead => (
-              <div 
-                key={lead.id} 
-                className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer group"
-              >
-                <div className="flex justify-between items-start mb-2">
-                  <h4 className="font-medium text-slate-800 text-sm">{lead.name}</h4>
-                  <span className="text-[10px] text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">
-                    {format(new Date(lead.created_at), 'dd/MM', { locale: ptBR })}
-                  </span>
-                </div>
-                
-                {/* Vehicle Info */}
-                {(lead as any).vehicles && (
-                    <div className="text-xs text-blue-600 font-medium mb-2 flex items-center gap-1">
-                        <User size={10} />
-                        {(lead as any).vehicles.brand} {(lead as any).vehicles.model}
-                    </div>
-                )}
-
-                <div className="space-y-1">
-                    {lead.phone && (
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
-                            <Phone size={12} /> {lead.phone}
-                        </div>
-                    )}
-                    {lead.email && (
-                        <div className="flex items-center gap-2 text-xs text-slate-500 truncate">
-                            <Mail size={12} /> {lead.email}
-                        </div>
-                    )}
-                </div>
-
-                {/* Quick Actions (Hover) */}
-                <div className="mt-3 pt-2 border-t border-slate-50 flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                    {status !== 'won' && (
-                        <button 
-                            onClick={(e) => { e.stopPropagation(); moveCard(lead.id, 'won'); }}
-                            className="text-[10px] text-emerald-600 hover:bg-emerald-50 px-2 py-1 rounded"
-                        >
-                            Marcar Vendido
-                        </button>
-                    )}
-                     {status !== 'contacted' && status !== 'won' && (
-                        <button 
-                            onClick={(e) => { e.stopPropagation(); moveCard(lead.id, 'contacted'); }}
-                            className="text-[10px] text-blue-600 hover:bg-blue-50 px-2 py-1 rounded"
-                        >
-                            Mover Contato
-                        </button>
-                    )}
-                </div>
-              </div>
-            ))}
-            
-            {leads.filter(l => l.status === status).length === 0 && (
-                <div className="text-center py-8 border-2 border-dashed border-slate-200 rounded-lg">
-                    <p className="text-xs text-slate-400">Vazio</p>
-                </div>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
+      {createPortal(
+        <DragOverlay>
+          {activeLead && (
+            <div className="opacity-90 rotate-2 scale-105 cursor-grabbing">
+                <KanbanCard lead={activeLead} moveCard={() => {}} />
+            </div>
+          )}
+        </DragOverlay>,
+        document.body
+      )}
+    </DndContext>
   );
 }

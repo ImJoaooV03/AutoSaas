@@ -11,11 +11,12 @@ import { Proposals } from './pages/Proposals';
 import { ProposalNew } from './pages/ProposalNew';
 import { ProposalDetails } from './pages/ProposalDetails';
 import { Reports } from './pages/Reports';
+import { Finance } from './pages/Finance'; // Importado
 import { SaasDashboard } from './pages/saas/SaasDashboard';
 import { Login } from './pages/Login';
 import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { NotFound } from './pages/NotFound'; // Importado
+import { NotFound } from './pages/NotFound';
 
 // Public Pages
 import { PublicLayout } from './layouts/PublicLayout';
@@ -55,7 +56,7 @@ function App() {
               <Route path="proposals" element={<Proposals />} />
               <Route path="proposals/new" element={<ProposalNew />} />
               <Route path="proposals/:id" element={<ProposalDetails />} />
-              <Route path="finance" element={<div className="p-8">Módulo Financeiro (Ver Detalhes do Veículo)</div>} />
+              <Route path="finance" element={<Finance />} /> {/* Atualizado */}
               <Route path="reports" element={<Reports />} />
               <Route path="settings" element={<Settings />} />
               

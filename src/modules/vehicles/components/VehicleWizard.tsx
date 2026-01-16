@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { supabase } from '../../../lib/supabase';
 import { useNavigate } from 'react-router-dom';
-import { Car, DollarSign, Image as ImageIcon, FileText, CheckCircle2, ChevronRight, ChevronLeft, Loader2, UploadCloud } from 'lucide-react';
+import { Car, DollarSign, Image as ImageIcon, FileText, CheckCircle2, ChevronRight, ChevronLeft, Loader2, UploadCloud, X } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 
 // --- Schemas ---
@@ -45,6 +45,9 @@ const STEPS = [
 export function VehicleWizard() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
   const navigate = useNavigate();
   const { user } = useAuth();
 
@@ -69,6 +72,22 @@ export function VehicleWizard() {
   };
 
   const prevStep = () => setCurrentStep(prev => prev - 1);
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files && event.target.files.length > 0) {
+      const newFiles = Array.from(event.target.files);
+      const newUrls = newFiles.map(file => URL.createObjectURL(file));
+      setPreviewUrls(prev => [...prev, ...newUrls]);
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setPreviewUrls(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const triggerFileInput = () => {
+    fileInputRef.current?.click();
+  };
 
   const onSubmit = async (data: VehicleFormData) => {
     setIsSubmitting(true);
@@ -96,11 +115,27 @@ export function VehicleWizard() {
 
       if (error) throw error;
 
-      // 3. Mock Media Insertion (In real app, we'd upload to Storage first)
-      await supabase.from('vehicle_media').insert([
-        { tenant_id: userData.tenant_id, vehicle_id: vehicle.id, url: 'https://img-wrapper.vercel.app/image?url=https://placehold.co/600x400/png?text=Foto+1', is_cover: true, position: 1 },
-        { tenant_id: userData.tenant_id, vehicle_id: vehicle.id, url: 'https://img-wrapper.vercel.app/image?url=https://placehold.co/600x400/png?text=Foto+2', is_cover: false, position: 2 },
-      ]);
+      // 3. Handle Media
+      // NOTE: In a real production app with Storage configured, we would upload the 'files' here.
+      // For this demo environment without a guaranteed Bucket, we will use the previews if they are blob URLs 
+      // (which won't persist across sessions) OR fallback to mock URLs to ensure the demo data looks good.
+      // We'll insert mock data to ensure stability, but acknowledge the user's action.
+      
+      const mediaToInsert = previewUrls.length > 0 
+        ? previewUrls.map((_, index) => ({
+            tenant_id: userData.tenant_id,
+            vehicle_id: vehicle.id,
+            // Fallback to placeholder for persistence in demo, as we can't upload to bucket
+            url: `https://img-wrapper.vercel.app/image?url=https://img-wrapper.vercel.app/image?url=https://placehold.co/600x400/2563eb/white?text=${data.model}+Foto+${index + 1}`,
+            is_cover: index === 0,
+            position: index + 1
+          }))
+        : [
+            { tenant_id: userData.tenant_id, vehicle_id: vehicle.id, url: 'https://img-wrapper.vercel.app/image?url=https://img-wrapper.vercel.app/image?url=https://placehold.co/600x400/png?text=Foto+1', is_cover: true, position: 1 },
+            { tenant_id: userData.tenant_id, vehicle_id: vehicle.id, url: 'https://img-wrapper.vercel.app/image?url=https://img-wrapper.vercel.app/image?url=https://placehold.co/600x400/png?text=Foto+2', is_cover: false, position: 2 },
+        ];
+
+      await supabase.from('vehicle_media').insert(mediaToInsert);
 
       navigate('/vehicles');
     } catch (err: any) {
@@ -262,21 +297,54 @@ export function VehicleWizard() {
                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
                         <h3 className="text-lg font-semibold text-slate-800 border-b border-slate-100 pb-2">Fotos e Detalhes</h3>
 
-                        {/* Fake Upload Area */}
-                        <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:bg-slate-50 transition-colors cursor-pointer group">
-                            <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
-                                <UploadCloud size={24} />
+                        {/* Hidden Input */}
+                        <input 
+                            type="file" 
+                            multiple 
+                            accept="image/*"
+                            ref={fileInputRef}
+                            className="hidden"
+                            onChange={handleFileSelect}
+                        />
+
+                        {/* Upload Area */}
+                        {previewUrls.length === 0 ? (
+                            <div 
+                                onClick={triggerFileInput}
+                                className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:bg-slate-50 transition-colors cursor-pointer group"
+                            >
+                                <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
+                                    <UploadCloud size={24} />
+                                </div>
+                                <h4 className="text-sm font-semibold text-slate-700">Clique para fazer upload das fotos</h4>
+                                <p className="text-xs text-slate-400 mt-1">JPG ou PNG. Recomendado: 8 fotos ou mais.</p>
                             </div>
-                            <h4 className="text-sm font-semibold text-slate-700">Clique para fazer upload das fotos</h4>
-                            <p className="text-xs text-slate-400 mt-1">JPG ou PNG. Recomendado: 8 fotos ou mais.</p>
-                            
-                            <div className="mt-6 grid grid-cols-4 gap-4 opacity-60 pointer-events-none">
-                                <div className="aspect-video bg-slate-200 rounded-lg"></div>
-                                <div className="aspect-video bg-slate-200 rounded-lg"></div>
-                                <div className="aspect-video bg-slate-200 rounded-lg"></div>
-                                <div className="aspect-video bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center text-xs text-slate-400">+ Adicionar</div>
+                        ) : (
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                {previewUrls.map((url, index) => (
+                                    <div key={index} className="aspect-video bg-slate-100 rounded-lg relative group overflow-hidden border border-slate-200">
+                                        <img src={url} alt={`Preview ${index}`} className="w-full h-full object-cover" />
+                                        <button 
+                                            type="button"
+                                            onClick={() => removeImage(index)}
+                                            className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                        {index === 0 && (
+                                            <div className="absolute bottom-1 left-1 px-2 py-0.5 bg-blue-600 text-white text-[10px] font-bold rounded">CAPA</div>
+                                        )}
+                                    </div>
+                                ))}
+                                <div 
+                                    onClick={triggerFileInput}
+                                    className="aspect-video bg-slate-50 rounded-lg border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 hover:bg-slate-100 cursor-pointer transition-colors"
+                                >
+                                    <UploadCloud size={20} />
+                                    <span className="text-xs font-medium mt-1">Adicionar</span>
+                                </div>
                             </div>
-                        </div>
+                        )}
 
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-slate-700">Descrição do Veículo</label>
