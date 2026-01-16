@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /app/
+Disallow: /saas/
+
+Sitemap: https://autos.com/sitemap.xml
