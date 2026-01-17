@@ -1,8 +1,8 @@
 import { Router, Request, Response } from 'express';
 import axios from 'axios';
-import { CONFIG } from './config.js';
-import { DbService } from './db.js';
-import { CryptoService } from './crypto.js';
+import { CONFIG } from './config';
+import { DbService } from './db';
+import { CryptoService } from './crypto';
 
 const router = Router();
 
@@ -15,7 +15,7 @@ router.get('/auth-url', (req: Request, res: Response) => {
 
   const state = Buffer.from(JSON.stringify({ tenantId })).toString('base64');
   
-  // Na Vercel, a URL de callback deve apontar para o domínio de produção
+  // URL de callback apontando para a API em produção
   const redirectUri = `${CONFIG.APP_URL}/api/integrations/olx/callback`;
   
   const scope = 'autoupload basic_user_info'; 

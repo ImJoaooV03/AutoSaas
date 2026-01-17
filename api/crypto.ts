@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { CONFIG } from './config.js';
+import { CONFIG } from './config';
 
 const ALGORITHM = 'aes-256-cbc';
 const KEY = crypto.scryptSync(CONFIG.ENCRYPTION_KEY, 'salt', 32); 
