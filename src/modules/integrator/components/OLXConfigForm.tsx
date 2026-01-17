@@ -3,9 +3,10 @@ import { supabase } from "../../../lib/supabase";
 import { useAuth } from "../../../context/AuthContext";
 import { Loader2, ExternalLink, CheckCircle2, AlertTriangle, RefreshCw, Power } from "lucide-react";
 
-// URL do Backend (BFF)
-// Em produção, isso viria de uma variável de ambiente VITE_API_URL
-const API_URL = 'http://localhost:3001'; 
+// Configuração Dinâmica da API
+// Em produção (Vercel), usa caminho relativo /api para bater na Serverless Function
+// Em desenvolvimento, usa localhost:3001
+const API_URL = import.meta.env.PROD ? '/api' : 'http://localhost:3001';
 
 interface OLXConfigFormProps {
   onSuccess: () => void;
@@ -51,6 +52,12 @@ export function OLXConfigForm({ onSuccess, onCancel }: OLXConfigFormProps) {
 
       // 1. Pedir URL de Auth para o Backend
       const response = await fetch(`${API_URL}/integrations/olx/auth-url?tenantId=${userData.tenant_id}`);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Falha na API (${response.status}): ${errorText}`);
+      }
+
       const data = await response.json();
 
       if (data.url) {
@@ -60,7 +67,8 @@ export function OLXConfigForm({ onSuccess, onCancel }: OLXConfigFormProps) {
         alert("Erro ao gerar URL de autenticação");
       }
     } catch (err: any) {
-      alert("Erro ao conectar: " + err.message);
+      console.error("Erro de conexão:", err);
+      alert("Erro ao conectar: " + err.message + "\n\nVerifique se as variáveis de ambiente (OLX_CLIENT_ID, etc) estão configuradas na Vercel.");
       setConnecting(false);
     }
   };
@@ -125,6 +133,10 @@ export function OLXConfigForm({ onSuccess, onCancel }: OLXConfigFormProps) {
                 {connecting ? <Loader2 className="animate-spin" /> : <ExternalLink size={18} />}
                 Autorizar Integração
             </button>
+            
+            <div className="mt-6 p-3 bg-blue-50 border border-blue-100 rounded text-xs text-blue-700 max-w-sm mx-auto">
+                <p><strong>Nota:</strong> Certifique-se de ter configurado as credenciais da OLX nas variáveis de ambiente da Vercel.</p>
+            </div>
         </div>
       ) : (
         <div className="space-y-6">
