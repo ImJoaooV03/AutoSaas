@@ -1,17 +1,11 @@
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { supabase } from "../../../lib/supabase";
 import { useAuth } from "../../../context/AuthContext";
-import { Loader2, Save, AlertCircle, Eye, EyeOff, Trash2, HelpCircle, ExternalLink } from "lucide-react";
+import { Loader2, ExternalLink, CheckCircle2, AlertTriangle, RefreshCw, Power } from "lucide-react";
 
-const olxSchema = z.object({
-  clientId: z.string().min(10, "Client ID inválido (mínimo 10 caracteres)"),
-  clientSecret: z.string().min(10, "Client Secret inválido (mínimo 10 caracteres)"),
-});
-
-type OLXFormData = z.infer<typeof olxSchema>;
+// URL do Backend (BFF)
+// Em produção, isso viria de uma variável de ambiente VITE_API_URL
+const API_URL = 'http://localhost:3001'; 
 
 interface OLXConfigFormProps {
   onSuccess: () => void;
@@ -21,13 +15,9 @@ interface OLXConfigFormProps {
 export function OLXConfigForm({ onSuccess, onCancel }: OLXConfigFormProps) {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [showSecret, setShowSecret] = useState(false);
-  const [connectionId, setConnectionId] = useState<string | null>(null);
-  
-  const { register, handleSubmit, formState: { errors }, setValue } = useForm<OLXFormData>({
-    resolver: zodResolver(olxSchema),
-  });
+  const [connecting, setConnecting] = useState(false);
+  const [connection, setConnection] = useState<any>(null);
+  const [testResult, setTestResult] = useState<any>(null);
 
   useEffect(() => {
     if (user) loadConnection();
@@ -45,164 +35,137 @@ export function OLXConfigForm({ onSuccess, onCancel }: OLXConfigFormProps) {
         .eq('portal_code', 'olx')
         .single();
 
-      if (data) {
-        setConnectionId(data.id);
-        const config = data.config_json || {};
-        setValue('clientId', config.clientId || '');
-        setValue('clientSecret', config.clientSecret || '');
-      }
+      if (data) setConnection(data);
     } catch (err) {
-      console.error("Erro ao carregar conexão", err);
+      console.error(err);
     } finally {
       setLoading(false);
     }
   }
 
-  const onSubmit = async (data: OLXFormData) => {
-    setSaving(true);
+  const handleConnect = async () => {
+    setConnecting(true);
     try {
       const { data: userData } = await supabase.from('users').select('tenant_id').eq('id', user?.id).single();
       if (!userData) throw new Error("Tenant não encontrado");
 
-      const payload = {
-        tenant_id: userData.tenant_id,
-        portal_code: 'olx',
-        is_active: true,
-        config_json: {
-          clientId: data.clientId,
-          clientSecret: data.clientSecret,
-          updatedAt: new Date().toISOString()
-        }
-      };
+      // 1. Pedir URL de Auth para o Backend
+      const response = await fetch(`${API_URL}/integrations/olx/auth-url?tenantId=${userData.tenant_id}`);
+      const data = await response.json();
 
-      if (connectionId) {
-        const { error } = await supabase
-          .from('portal_connections')
-          .update(payload)
-          .eq('id', connectionId);
-        if (error) throw error;
+      if (data.url) {
+        // 2. Redirecionar usuário para OLX
+        window.location.href = data.url;
       } else {
-        const { error } = await supabase
-          .from('portal_connections')
-          .insert(payload);
-        if (error) throw error;
+        alert("Erro ao gerar URL de autenticação");
       }
-
-      onSuccess();
     } catch (err: any) {
-      alert("Erro ao salvar conexão: " + err.message);
-    } finally {
-      setSaving(false);
+      alert("Erro ao conectar: " + err.message);
+      setConnecting(false);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    setTestResult(null);
+    try {
+      const { data: userData } = await supabase.from('users').select('tenant_id').eq('id', user?.id).single();
+      
+      const response = await fetch(`${API_URL}/integrations/olx/me?tenantId=${userData.tenant_id}`);
+      const data = await response.json();
+
+      if (response.ok) {
+        setTestResult({ success: true, message: `Conectado como: ${data.user?.name || 'Usuário OLX'}` });
+      } else {
+        setTestResult({ success: false, message: 'Falha na validação. Token pode estar expirado.' });
+      }
+    } catch (err) {
+      setTestResult({ success: false, message: 'Erro de rede ao testar conexão.' });
     }
   };
 
   const handleDisconnect = async () => {
-    if (!connectionId || !confirm("Tem certeza? Isso irá pausar todas as sincronizações com a OLX.")) return;
-    
-    setSaving(true);
+    if (!confirm("Tem certeza? Isso impedirá novas publicações.")) return;
     try {
-       await supabase.from('portal_connections').delete().eq('id', connectionId);
-       onSuccess();
-    } catch (err: any) {
-       alert("Erro ao desconectar: " + err.message);
-    } finally {
-       setSaving(false);
+        await supabase.from('portal_connections').delete().eq('id', connection.id);
+        setConnection(null);
+        onSuccess();
+    } catch (err) {
+        alert("Erro ao desconectar");
     }
   };
 
   if (loading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin text-blue-600" /></div>;
 
   return (
-    <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 animate-in fade-in slide-in-from-top-2">
+    <div className="bg-white p-6 rounded-xl border border-slate-200 animate-in fade-in slide-in-from-top-2 shadow-sm">
       <div className="flex justify-between items-start mb-6">
         <div>
             <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                 Configurar OLX Brasil
-                {connectionId && <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200">Ativo</span>}
+                {connection?.is_active && <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200">Ativo</span>}
             </h3>
-            <p className="text-sm text-slate-500 mt-1">Integração oficial via API para publicação automática.</p>
-        </div>
-        {connectionId && (
-            <button 
-                type="button" 
-                onClick={handleDisconnect}
-                className="text-red-600 hover:bg-red-50 p-2 rounded-lg transition-colors text-sm font-medium flex items-center gap-2"
-            >
-                <Trash2 size={16} /> Desconectar
-            </button>
-        )}
-      </div>
-
-      <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 mb-6 flex gap-3">
-        <div className="p-2 bg-blue-100 text-blue-600 rounded-lg h-fit">
-            <ExternalLink size={18} />
-        </div>
-        <div>
-            <h4 className="text-sm font-bold text-blue-800">Onde encontrar as credenciais?</h4>
-            <p className="text-xs text-blue-700 mt-1 leading-relaxed">
-                Acesse o <a href="#" className="underline hover:text-blue-900 font-medium">Portal do Desenvolvedor OLX</a>, vá em "Minhas Aplicações" e crie um novo App.
-                Copie o <strong>Client ID</strong> e o <strong>Client Secret</strong> gerados lá e cole abaixo.
-            </p>
+            <p className="text-sm text-slate-500 mt-1">Conecte sua conta profissional para publicar automaticamente.</p>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-        <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Client ID</label>
-            <input 
-                {...register('clientId')}
-                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none transition-all"
-                placeholder="Ex: client_123456789"
-            />
-            <div className="flex items-start gap-1.5 mt-1.5 text-xs text-slate-500">
-                <HelpCircle size={12} className="mt-0.5 flex-shrink-0" />
-                <span>Identificador público da sua aplicação na OLX. Geralmente começa com "client_".</span>
+      {!connection ? (
+        <div className="text-center py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+            <div className="w-16 h-16 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Power size={32} />
             </div>
-            {errors.clientId && <p className="text-red-500 text-xs mt-1 flex items-center gap-1"><AlertCircle size={12}/> {errors.clientId.message}</p>}
+            <h4 className="font-bold text-slate-800 mb-2">Conectar Conta OLX</h4>
+            <p className="text-sm text-slate-500 max-w-md mx-auto mb-6">
+                Você será redirecionado para o site da OLX para autorizar o AutoSaaS a gerenciar seus anúncios.
+            </p>
+            <button 
+                onClick={handleConnect}
+                disabled={connecting}
+                className="bg-purple-600 hover:bg-purple-700 text-white px-8 py-3 rounded-lg font-bold shadow-lg shadow-purple-200 transition-transform hover:-translate-y-1 flex items-center gap-2 mx-auto"
+            >
+                {connecting ? <Loader2 className="animate-spin" /> : <ExternalLink size={18} />}
+                Autorizar Integração
+            </button>
         </div>
+      ) : (
+        <div className="space-y-6">
+            <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-4 flex gap-3 items-start">
+                <CheckCircle2 className="text-emerald-600 flex-shrink-0 mt-0.5" size={20} />
+                <div>
+                    <h4 className="font-bold text-emerald-800 text-sm">Integração Ativa</h4>
+                    <p className="text-emerald-700 text-xs mt-1">
+                        Sua conta está conectada e pronta para receber anúncios.
+                        <br/>Conectado em: {new Date(connection.created_at).toLocaleDateString()}
+                    </p>
+                </div>
+            </div>
 
-        <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Client Secret</label>
-            <div className="relative">
-                <input 
-                    {...register('clientSecret')}
-                    type={showSecret ? "text" : "password"}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none transition-all pr-10"
-                    placeholder="••••••••••••••••"
-                />
+            {testResult && (
+                <div className={`p-3 rounded-lg text-sm flex items-center gap-2 ${testResult.success ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-700'}`}>
+                    {testResult.success ? <CheckCircle2 size={16}/> : <AlertTriangle size={16}/>}
+                    {testResult.message}
+                </div>
+            )}
+
+            <div className="flex gap-3 pt-4 border-t border-slate-100">
                 <button 
-                    type="button"
-                    onClick={() => setShowSecret(!showSecret)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    onClick={handleTestConnection}
+                    className="px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-lg font-medium text-sm flex items-center gap-2"
                 >
-                    {showSecret ? <EyeOff size={18} /> : <Eye size={18} />}
+                    <RefreshCw size={16} /> Testar Conexão
+                </button>
+                <button 
+                    onClick={handleDisconnect}
+                    className="px-4 py-2 bg-white border border-red-100 text-red-600 hover:bg-red-50 rounded-lg font-medium text-sm flex items-center gap-2"
+                >
+                    Desconectar
                 </button>
             </div>
-            <div className="flex items-start gap-1.5 mt-1.5 text-xs text-slate-500">
-                <HelpCircle size={12} className="mt-0.5 flex-shrink-0" />
-                <span>Chave secreta para autenticação. Nunca compartilhe este código.</span>
-            </div>
-            {errors.clientSecret && <p className="text-red-500 text-xs mt-1 flex items-center gap-1"><AlertCircle size={12}/> {errors.clientSecret.message}</p>}
         </div>
+      )}
 
-        <div className="pt-4 flex justify-end gap-3 border-t border-slate-200 mt-6">
-            <button 
-                type="button" 
-                onClick={onCancel}
-                className="px-4 py-2 text-slate-600 hover:bg-slate-200 rounded-lg font-medium transition-colors"
-            >
-                Cancelar
-            </button>
-            <button 
-                type="submit" 
-                disabled={saving}
-                className="px-6 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium flex items-center gap-2 shadow-lg shadow-purple-200 disabled:opacity-70 transition-all"
-            >
-                {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-                Salvar Conexão
-            </button>
-        </div>
-      </form>
+      <div className="mt-6 flex justify-end">
+        <button onClick={onCancel} className="text-sm text-slate-500 hover:underline">Voltar</button>
+      </div>
     </div>
   );
 }
